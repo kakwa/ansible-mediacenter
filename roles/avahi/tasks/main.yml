@@ -1,3 +1,22 @@
 ---
-# TODO: avahi role — advertise kodi.local.
-# Intentionally a no-op stub until implemented.
+# Advertise the box on the LAN as {{ kodi_box_name }}.local.
+# The hostname itself is set by the base role; avahi publishes it
+# automatically. We just keep the daemon on and tidy the publish section
+# so it does not advertise workstation/HINFO noise.
+
+- name: Avahi daemon enabled and running
+  ansible.builtin.systemd:
+    name: avahi-daemon
+    enabled: true
+    state: started
+
+- name: Avahi publish section (no hinfo/workstation noise)
+  ansible.builtin.blockinfile:
+    path: /etc/avahi/avahi-daemon.conf
+    marker: "# {mark} ANSIBLE MANAGED: publish"
+    block: |
+      [publish]
+      publish-hinfo=no
+      publish-workstation=no
+    state: present
+  notify: restart avahi-daemon

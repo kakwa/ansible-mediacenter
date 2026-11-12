@@ -1,0 +1,15 @@
+---
+- name: reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+# SIGHUP reloads logind's config without tearing down its sessions
+# (a full restart of systemd-logind would kill the cage sessions).
+- name: reload systemd-logind
+  ansible.builtin.command: systemctl kill -s HUP systemd-logind
+  changed_when: true
+
+- name: restart kiosk-idle-off
+  ansible.builtin.systemd:
+    name: kiosk-idle-off
+    state: restarted

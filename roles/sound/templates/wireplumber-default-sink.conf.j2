@@ -1,0 +1,16 @@
+# Managed by Ansible (sound role).
+# Prefer the {{ default_audio_device | regex_escape }} output as the default
+# sink. WirePlumber picks the highest priority.session node; default sinks
+# sit around 600-1100, keep this below 1500 (wireplumber docs).
+monitor.alsa.rules = [
+  {
+    matches = [
+      { node.name = "~alsa_output.{{ default_audio_device }}" }
+    ]
+    actions = {
+      update-props = {
+        priority.session = {{ default_audio_priority }}
+      }
+    }
+  }
+]

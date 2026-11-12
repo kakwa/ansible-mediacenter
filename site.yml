@@ -10,5 +10,4 @@
     - avahi       # kodi.local
     - plymouth    # boot splash + grub
     - powersaving # idle screen-off / suspend, tlp
-    - spotifyd    # system spotify daemon on the pipewire sink
     - nfs         # NAS media mount

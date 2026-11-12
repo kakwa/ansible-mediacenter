@@ -1,0 +1,6 @@
+---
+# sources.xml is read on startup; restart the kodi cage to pick it up.
+- name: restart kodi kiosk
+  ansible.builtin.systemd:
+    name: cage-kodi
+    state: restarted

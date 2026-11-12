@@ -1,0 +1,41 @@
+<sources>
+    <programs>
+        <default pathversion="1"></default>
+    </programs>
+    <video>
+        <default pathversion="1"></default>
+{% for src in kodi_media_roots.video | default([]) %}
+        <source>
+            <name>{{ src.name }}</name>
+            <path pathversion="1">{{ src.path }}/</path>
+            <allowsharing>true</allowsharing>
+        </source>
+{% endfor %}
+    </video>
+    <music>
+        <default pathversion="1"></default>
+{% for src in kodi_media_roots.music | default([]) %}
+        <source>
+            <name>{{ src.name }}</name>
+            <path pathversion="1">{{ src.path }}/</path>
+            <allowsharing>true</allowsharing>
+        </source>
+{% endfor %}
+    </music>
+    <pictures>
+        <default pathversion="1"></default>
+{% for src in kodi_media_roots.pictures | default([]) %}
+        <source>
+            <name>{{ src.name }}</name>
+            <path pathversion="1">{{ src.path }}/</path>
+            <allowsharing>true</allowsharing>
+        </source>
+{% endfor %}
+    </pictures>
+    <files>
+        <default pathversion="1"></default>
+    </files>
+    <games>
+        <default pathversion="1"></default>
+    </games>
+</sources>

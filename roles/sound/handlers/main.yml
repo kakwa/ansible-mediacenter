@@ -1,0 +1,8 @@
+---
+- name: restart wireplumber
+  ansible.builtin.command: systemctl --user restart wireplumber
+  become_user: "{{ kodi_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ kodi_user_uid }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ kodi_user_uid }}/bus"
+  changed_when: true

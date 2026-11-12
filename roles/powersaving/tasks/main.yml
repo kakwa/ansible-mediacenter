@@ -1,3 +1,67 @@
 ---
-# TODO: powersaving role — idle screen-off / suspend, tlp.
-# Intentionally a no-op stub until implemented.
+# Powersaving:
+#   * tlp (installed + enabled, default config)
+#   * idle screen-off: a small daemon that disables the foreground cage
+#     output (wlr-randr --off) once every kiosk TTY session has been idle
+#     for screen_off_after seconds, and re-enables it on the next input.
+#     (cage does not implement wlr-output-power-management-v1, so wlopm
+#     cannot be used; --off/--on on the output is safe for cage — verified.)
+#   * optional system suspend after suspend_after seconds idle via
+#     logind IdleAction (powersaving_suspend). NB: suspend can hang if
+#     Kodi holds open NFS handles.
+
+- name: Powersaving packages
+  ansible.builtin.apt:
+    name: tlp
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: tlp enabled and running
+  ansible.builtin.systemd:
+    name: tlp
+    enabled: true
+    state: started
+
+- name: logind drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/logind.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: logind idle action drop-in
+  ansible.builtin.template:
+    src: logind-idle.conf.j2
+    dest: /etc/systemd/logind.conf.d/99-kiosk-idle.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: reload systemd-logind
+
+- name: Idle screen-off daemon script
+  ansible.builtin.template:
+    src: idle-off.sh.j2
+    dest: /usr/local/bin/kiosk-idle-off.sh
+    owner: root
+    group: root
+    mode: "0755"
+  notify: restart kiosk-idle-off
+
+- name: Idle screen-off daemon unit
+  ansible.builtin.template:
+    src: kiosk-idle-off.service.j2
+    dest: /etc/systemd/system/kiosk-idle-off.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart kiosk-idle-off
+
+- name: Idle screen-off daemon enabled and running
+  ansible.builtin.systemd:
+    name: kiosk-idle-off
+    enabled: true
+    state: started

@@ -1,3 +1,31 @@
 ---
-# TODO: kodi role — kodi + inputstreams, media sources, settings.
-# Intentionally a no-op stub until implemented.
+# Kodi (packages via kodi_packages) and the generated media sources
+# (userdata/sources.xml from kodi_media_roots).
+#
+# No custom keymap is needed: cage intercepts the Alt+F<n> VT-switch keys
+# at the compositor level before they reach the client, so Kodi can never
+# swallow them and Alt+F1..F3 always works.
+
+- name: Kodi packages
+  ansible.builtin.apt:
+    name: "{{ kodi_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Kodi userdata directory
+  ansible.builtin.file:
+    path: "{{ kodi_home }}/.kodi/userdata"
+    state: directory
+    owner: "{{ kodi_user }}"
+    group: "{{ kodi_user }}"
+    mode: "0755"
+
+- name: Kodi media sources (sources.xml)
+  ansible.builtin.template:
+    src: sources.xml.j2
+    dest: "{{ kodi_home }}/.kodi/userdata/sources.xml"
+    owner: "{{ kodi_user }}"
+    group: "{{ kodi_user }}"
+    mode: "0644"
+  notify: restart kodi kiosk

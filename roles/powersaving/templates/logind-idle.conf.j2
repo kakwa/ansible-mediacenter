@@ -1,0 +1,4 @@
+{%- set idle_action = 'suspend' if powersaving_suspend else 'ignore' -%}
+[Login]
+IdleAction={{ idle_action }}
+IdleActionSec={{ suspend_after }}

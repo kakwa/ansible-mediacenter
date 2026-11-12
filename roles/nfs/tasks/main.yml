@@ -1,3 +1,33 @@
 ---
-# TODO: nfs role — NAS media mount.
-# Intentionally a no-op stub until implemented.
+# Mount the NAS share that holds Kodi's media.
+- name: NFS client
+  ansible.builtin.apt:
+    name: nfs-common
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: NFS mount point
+  ansible.builtin.file:
+    path: "{{ nfs_media_mount }}"
+    state: directory
+    owner: "{{ kodi_user }}"
+    group: "{{ kodi_user }}"
+
+- name: NFS fstab entry
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: '^\s*{{ nfs_media_host }}:'
+    line: "{{ nfs_media_host }}:{{ nfs_media_export }} {{ nfs_media_mount }} nfs _netdev,soft,nofail,timeo=900,retrans=5,bg,vers=3 0 0"
+    state: present
+
+- name: NFS is mounted
+  ansible.builtin.command: mountpoint -q {{ nfs_media_mount }}
+  register: nfs_mountpoint
+  failed_when: false
+  changed_when: false
+
+- name: Mount NFS (first run / after fstab change)
+  ansible.builtin.command: mount {{ nfs_media_mount }}
+  when: nfs_mountpoint.rc != 0
+  changed_when: true
