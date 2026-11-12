@@ -1,0 +1,14 @@
+---
+- name: Kodi media box (192.168.1.6)
+  hosts: kodi_boxes
+  become: true
+  roles:
+    - base        # hostname, user groups, essential packages
+    - kodi        # kodi + inputstreams, media sources, settings
+    - kiosk       # 3x cage: tty1 kodi / tty2 browser / tty3 spotify
+    - sound       # pipewire sound server, default output
+    - avahi       # kodi.local
+    - plymouth    # boot splash + grub
+    - powersaving # idle screen-off / suspend, tlp
+    - spotifyd    # system spotify daemon on the pipewire sink
+    - nfs         # NAS media mount

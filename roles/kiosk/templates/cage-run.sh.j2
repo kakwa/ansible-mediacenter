@@ -1,0 +1,67 @@
+#!/bin/sh
+# Usage: cage-run.sh <tty-number> <app-launcher> [scale]
+# Wait until our VT is the foreground console, then start cage.
+# If scale is given, (re)apply it with wlr-randr every time our VT
+# becomes foreground: wlroots destroys the output when the VT is
+# lost, so a previously set scale does not survive VT switches.
+tty=$1
+app=$2
+scale=${3:-}
+{% set xdg_line = 'xdg="${XDG_RUNTIME_DIR:-/run/user/' ~ kodi_user_uid ~ '}"' -%}
+{{ xdg_line }}
+
+while [ "$(fgconsole 2>/dev/null)" != "$tty" ]; do
+  sleep 1
+done
+
+# Snapshot the wayland sockets that already exist, so we can spot
+# the one our cage instance creates.
+before=$(ls -1 "$xdg" 2>/dev/null | grep -E "^wayland-[0-9]+$" | sort)
+
+/usr/bin/cage -ds -- "$app" &
+cage_pid=$!
+
+socket=""
+i=0
+while [ -z "$socket" ] && [ "$i" -lt 100 ]; do
+  kill -0 "$cage_pid" 2>/dev/null || break
+  after=$(ls -1 "$xdg" 2>/dev/null | grep -E "^wayland-[0-9]+$" | sort)
+  for s in $after; do
+    if ! printf "%s\n" "$before" | grep -qx "$s"; then
+      socket=$s
+      break
+    fi
+  done
+  [ -z "$socket" ] && sleep 0.1
+  i=$((i + 1))
+done
+
+watcher_pid=""
+if [ -n "$scale" ]; then
+  (
+    applied=0
+    while kill -0 "$cage_pid" 2>/dev/null; do
+      if [ "$(fgconsole 2>/dev/null)" = "$tty" ]; then
+        if [ "$applied" = "0" ] && [ -n "$socket" ]; then
+          name=$(WAYLAND_DISPLAY="$socket" wlr-randr 2>/dev/null | head -n 1 | cut -d " " -f 1)
+          if [ -n "$name" ] && WAYLAND_DISPLAY="$socket" wlr-randr --output "$name" --scale "$scale" 2>/dev/null; then
+            applied=1
+          else
+            sleep 0.5
+            continue
+          fi
+        fi
+      else
+        applied=0
+      fi
+      sleep 0.5
+    done
+  ) &
+  watcher_pid=$!
+fi
+
+wait "$cage_pid"
+rc=$?
+[ -n "$watcher_pid" ] && kill "$watcher_pid" 2>/dev/null
+wait "$watcher_pid" 2>/dev/null
+exit "$rc"

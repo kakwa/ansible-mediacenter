@@ -1,0 +1,44 @@
+---
+# Target box identity
+kodi_box_name: kodi            # hostname + avahi name (kodi.local)
+kodi_user: kakwa
+kodi_user_uid: 1001
+kodi_home: /var/lib/xbmc       # actual home of kakwa on the box
+
+# Media
+nfs_media_host: nas.kakwa.fr   # 192.168.1.3
+nfs_media_export: /volume1/shared/
+nfs_media_mount: /home/nfs
+kodi_media_roots:
+  - name: films
+    path: /home/nfs/films
+    type: movies
+  - name: series
+    path: /home/nfs/animes
+    type: tvshows
+  # extend as the library layout dictates (music, documentaires, ...)
+
+# Kiosk layout (which TTY runs what, prestop, scale) lives in
+# roles/kiosk/vars/main.yml — the single canonical list. Only the
+# box-specific browser URLs are configured here.
+kiosk_browser:
+  web_url: https://duckduckgo.com
+  spotify_url: https://open.spotify.com
+
+# Kodi
+kodi_packages:
+  - kodi
+  - kodi-inputstream-adaptive
+  - kodi-inputstream-ffmpegdirect
+  - kodi-inputstream-rtmp
+
+# Sound
+sound_server: pipewire
+default_audio_device: usb-soundblaster   # matched loosely by name
+
+# Power
+screen_off_after: 300      # seconds idle -> screen off
+suspend_after: 900         # seconds idle -> system suspend
+
+# Boot
+plymouth_theme: spinfinity

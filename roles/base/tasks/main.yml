@@ -1,0 +1,39 @@
+---
+- name: Set hostname
+  ansible.builtin.hostname:
+    name: "{{ kodi_box_name }}"
+
+- name: Ensure hostname in /etc/hosts
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: "^127\\.0\\.1\\.1"
+    line: "127.0.1.1 {{ kodi_box_name }}.local {{ kodi_box_name }}"
+
+- name: Add {{ kodi_user }} to render group (GPU access for the cages)
+  ansible.builtin.user:
+    name: "{{ kodi_user }}"
+    groups: render
+    append: true
+
+- name: Base packages
+  ansible.builtin.apt:
+    name:
+      - avahi-daemon
+      - avahi-utils
+      - pipewire
+      - pipewire-pulse
+      - wireplumber
+      - plymouth
+      - plymouth-themes
+      - tlp
+      - nfs-common
+      - firefox-esr
+      - wlopm
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Ensure user runtime dir service exists for kiosk env
+  ansible.builtin.systemd:
+    name: "user@{{ kodi_user_uid }}"
+    enabled: true

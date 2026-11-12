@@ -1,0 +1,27 @@
+{%- set scale_arg = ' ' ~ item.scale if item.scale is defined else '' -%}
+[Unit]
+Description=cage-{{ item.name }} (cage-{{ item.name }} on tty{{ item.tty }})
+After=remote-fs.target sound.target user@{{ kodi_user_uid }}.service
+Wants=network-online.target
+Conflicts=getty@tty{{ item.tty }}.service
+
+[Service]
+User={{ kodi_user }}
+Group={{ kodi_user }}
+Environment=HOME={{ kodi_home }}
+Environment=XDG_RUNTIME_DIR=/run/user/{{ kodi_user_uid }}
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ kodi_user_uid }}/bus
+PAMName=login
+TTYPath=/dev/tty{{ item.tty }}
+ExecStartPre=/bin/sh -c '{{ item.prestop }}'
+ExecStart=/usr/local/bin/cage-run.sh {{ item.tty }} {{ item.app }}{{ scale_arg }}
+ExecStop=/bin/sh -c '{{ item.prestop }}'
+TimeoutStopSec=15
+KillMode=mixed
+Restart=on-failure
+RestartSec=2
+StandardInput=tty
+StandardOutput=journal
+
+[Install]
+WantedBy=graphical.target

@@ -1,0 +1,26 @@
+---
+# One cage per TTY. Alt+F<n> switches between them.
+#
+#   prestop: run before cage starts (and again on stop) to reap a stale
+#            instance of the app from a previous boot/VT session.
+#            killall matches the process name; the [f]irefox bracket
+#            trick keeps pkill -f from matching its own wrapper cmdline.
+#   scale:   optional compositor-level UI scale (wlr-randr) for this TTY.
+#            Omitted where it would be wrong or unwanted (kodi stays 1.0).
+#            cage-run.sh re-applies it after every VT switch, because
+#            wlroots destroys the output when the VT is lost.
+kiosk_tys:
+  - tty: 1
+    name: kodi
+    app: /usr/local/bin/cage-kodi
+    prestop: killall -9 kodi.bin kodi-standalone 2>/dev/null; true
+  - tty: 2
+    name: web
+    app: /usr/local/bin/cage-web
+    scale: 2
+    prestop: pkill -9 -u {{ kodi_user }} -f "[f]irefox-esr.*kiosk-web" 2>/dev/null; true
+  - tty: 3
+    name: spotify
+    app: /usr/local/bin/cage-spotify
+    scale: 2
+    prestop: pkill -9 -u {{ kodi_user }} -f "[f]irefox-esr.*kiosk-spotify" 2>/dev/null; true

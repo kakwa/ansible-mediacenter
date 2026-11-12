@@ -1,0 +1,4 @@
+{%- set middle = (item.comment ~ "\n") if item.comment is defined else "" -%}
+#!/bin/sh
+for i in $(seq 1 100); do [ -S /run/user/{{ kodi_user_uid }}/bus ] && break; sleep 0.2; done
+{{ middle }}{{ item.exec }}

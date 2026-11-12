@@ -1,0 +1,84 @@
+---
+# Kiosk: one cage instance per TTY.
+#   F1 -> kodi, F2 -> browser, F3 -> spotify
+# Alt+F<n> switches (cage -s enables VT switching).
+#
+# Each cage is wrapped by cage-run.sh, which
+#   * waits for its own VT to be the foreground console before starting,
+#   * (optionally) applies a wlr-randr UI scale and re-applies it after
+#     every VT switch (wlroots destroys the output when the VT is lost,
+#     so a previously set scale does not survive VT switches).
+
+- name: Kiosk packages
+  ansible.builtin.apt:
+    name:
+      - cage
+      - wlr-randr
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: cage-run.sh VT/scale wrapper
+  ansible.builtin.template:
+    src: cage-run.sh.j2
+    dest: /usr/local/bin/cage-run.sh
+    owner: root
+    mode: "0755"
+  notify: restart cage units
+
+- name: Launcher scripts
+  ansible.builtin.template:
+    src: launcher.sh.j2
+    dest: "/usr/local/bin/{{ item.app_name }}"
+    owner: root
+    mode: "0755"
+  loop:
+    - app_name: cage-kodi
+      exec: "exec /usr/bin/kodi-standalone"
+    - app_name: cage-web
+      comment: "# normal mode: tabs + url bar, dedicated profile"
+      exec: >-
+        exec /usr/bin/firefox-esr
+        --profile {{ kodi_home }}/.mozilla/kiosk-web
+        {{ kiosk_browser.web_url }}
+    - app_name: cage-spotify
+      exec: >-
+        exec /usr/bin/firefox-esr
+        --profile {{ kodi_home }}/.mozilla/kiosk-spotify
+        {{ kiosk_browser.spotify_url }}
+  loop_control:
+    label: "{{ item.app_name }}"
+
+- name: Firefox profile dirs
+  ansible.builtin.file:
+    path: "{{ kodi_home }}/.mozilla/{{ item }}"
+    state: directory
+    owner: "{{ kodi_user }}"
+    group: "{{ kodi_user }}"
+  loop:
+    - kiosk-web
+    - kiosk-spotify
+
+- name: Cage units (one per TTY)
+  ansible.builtin.template:
+    src: cage.service.j2
+    dest: "/etc/systemd/system/cage-{{ item.name }}.service"
+    owner: root
+    mode: "0644"
+  loop: "{{ kiosk_tys }}"
+  notify:
+    - reload systemd
+    - restart cage units
+
+- name: Cage units enabled
+  ansible.builtin.systemd:
+    name: "cage-{{ item.name }}"
+    enabled: true
+    state: started
+  loop: "{{ kiosk_tys }}"
+
+- name: Gettys on kiosk TTYs stay off
+  ansible.builtin.systemd:
+    name: "getty@tty{{ item.tty }}"
+    enabled: false
+  loop: "{{ kiosk_tys }}"
