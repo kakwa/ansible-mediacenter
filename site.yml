@@ -11,3 +11,4 @@
     - plymouth    # boot splash + grub
     - powersaving # idle screen-off / suspend, tlp
     - nfs         # NAS media mount
+    - hue-plugs   # Hue smart plug CLI + stop-on-suspend / restart-on-resume hook

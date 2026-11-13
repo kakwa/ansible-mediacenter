@@ -71,9 +71,22 @@ default_audio_device: usb-.*
 # sit around 600-1100. Keep below 1500 (see the wireplumber docs).
 default_audio_priority: 1200
 
+# Hue smart plugs (role: hue-plugs)
+# The box suspends/restarts the "PlugHifi" plug on system sleep:
+#   pre suspend  -> stop   (device loses power while the box sleeps)
+#   post resume  -> restart (off, wait hue_restart_delay, on)
+# hue_suspend_plug: "PlugHifi"   # already the default
+# First deploy without credentials (the role prints pairing instructions);
+# after `hue-plugs.py setup --save` + `autofill --save` on the box, fill in:
+# hue_bridge_ip: "192.168.1.x"
+# hue_client_key: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+# hue_plugs:
+#   - { id: "1", name: "PlugHifi" }
+# and re-run the playbook so Ansible manages /etc/hue-plugs.conf.
+
 # Power
-screen_off_after: 300      # seconds idle -> screen off
-suspend_after: 900         # seconds idle -> system suspend
+screen_off_after: 36000      # seconds idle -> screen off
+suspend_after: 108000         # seconds idle -> system suspend
 # NB: suspend can hang if Kodi holds open NFS handles; set
 # powersaving_suspend: false to disable it.
 powersaving_suspend: true

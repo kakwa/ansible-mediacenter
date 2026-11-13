@@ -21,6 +21,7 @@ Ansible setup for the Kodi media box (192.168.1.6).
 | avahi       | announce `kodi.local` |
 | plymouth    | boot splash + grub cleanup |
 | powersaving | idle screen-off + system suspend, tlp |
+| hue-plugs   | Hue smart plug CLI (`hue-plugs.py`) + stop-on-suspend / restart-on-resume system-sleep hook |
 | spotifyd    | spotifyd system service routed to PipeWire |
 | nfs         | `/home/nfs` mount from the NAS |
 

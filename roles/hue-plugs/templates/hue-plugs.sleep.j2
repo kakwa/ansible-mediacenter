@@ -1,0 +1,61 @@
+#!/bin/sh
+# systemd system-sleep hook for hue-plugs (managed by Ansible).
+#
+# Power-manages the device behind the "{{ hue_suspend_plug }}" Hue plug when
+# the box suspends/resumes:
+#   pre  suspend|hibernate|hybrid-sleep -> {{ hue_suspend_action }} the plug
+#        (runs while the network is still up)
+#   post resume|thaw                    -> {{ hue_wake_action }} the plug
+#        (waits until the bridge answers again, at most ~30 s)
+#
+# All activity is appended to /var/log/hue-plugs-sleep.log.
+
+set -u
+
+HUE_PLUGS={{ hue_script_path }}
+CONFIG={{ hue_config_file }}
+PLUG={{ hue_suspend_plug }}
+LOG=/var/log/hue-plugs-sleep.log
+
+log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG" 2>/dev/null || true; }
+
+# Dormant until the config file exists (it is created by
+# `hue-plugs.py setup`, see the playbook's pairing instructions).
+if [ ! -r "$CONFIG" ]; then
+    log "$1 $2: no config at $CONFIG, skipping"
+    exit 0
+fi
+
+run() {
+    # run <action>: invoke hue-plugs and log the outcome
+    if "$HUE_PLUGS" "$1" "$PLUG" >> "$LOG" 2>&1; then
+        log "$1 $PLUG: ok"
+    else
+        log "$1 $PLUG: FAILED"
+    fi
+}
+
+case "$1 $2" in
+    "pre suspend"|"pre hibernate"|"pre hybrid-sleep")
+        log "pre $2: {{ hue_suspend_action }} $PLUG"
+        run {{ hue_suspend_action }}
+        ;;
+    "post resume"|"post thaw")
+        # After resume the network may need a moment; wait until the bridge
+        # answers (up to ~30 s) before acting.
+        i=0
+        while [ $i -lt 10 ]; do
+            "$HUE_PLUGS" ping >> "$LOG" 2>&1 && break
+            i=$((i + 1))
+            [ $i -lt 10 ] && sleep 2
+        done
+        [ $i -ge 10 ] && log "post $2: bridge still unreachable after retries"
+        log "post $2: {{ hue_wake_action }} $PLUG"
+        run {{ hue_wake_action }}
+        ;;
+    *)
+        # Other sleep states (e.g. idle) are not our concern.
+        ;;
+esac
+
+exit 0

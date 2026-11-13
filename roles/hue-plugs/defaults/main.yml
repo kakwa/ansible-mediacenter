@@ -1,0 +1,52 @@
+---
+# hue-plugs: command-line helper to power on/off/restart devices behind
+# Philips Hue smart plugs.
+#
+# Installs a small stdlib-only Python CLI (/usr/local/bin/hue-plugs.py), a
+# JSON config file mapping human-readable names to Hue light IDs, and a
+# systemd system-sleep hook that stops the configured plug on suspend and
+# restarts it on resume. No daemon: the tool talks to the Hue bridge on
+# demand through the standard Hue HTTP API.
+hue_plugs_enable: true
+
+# Hue bridge address and client key (the "username" the bridge returns when
+# you pair a new client). Leave both empty for the first deploy: the role
+# then only installs the script and the sleep hook, prints manual pairing
+# instructions (hue-plugs.py setup), and the hook stays dormant until the
+# config file exists on the box. Once set, the role manages the config file
+# itself (see below), so set them from vault or from one-line files next to
+# the playbook, e.g.:
+#   hue_bridge_ip: "{{ vault_hue_bridge_ip | default(lookup('file', playbook_dir ~ '/hue_bridge_ip.txt') | trim, true) }}"
+hue_bridge_ip: ""
+hue_client_key: ""
+
+# Plugs to manage: a list of {id, name} entries mapping the Hue light ID of a
+# smart plug to a human-readable name (usually the name of the powered
+# device). Light IDs are bridge-local numbers, not stable across bridges;
+# find them with `hue-plugs.py autofill` after pairing. REQUIRED together
+# with hue_bridge_ip / hue_client_key.
+# Example:
+#   - id: "1"
+#     name: "PlugHifi"
+hue_plugs: []
+
+# Seconds to wait between powering off and back on for `hue-plugs restart`,
+# so the device behind the plug is actually off before it is powered again.
+# Also used by the sleep hook's wake-up `restart`.
+hue_restart_delay: 15
+
+# Suspend/resume behaviour (systemd system-sleep hook). The plug is looked
+# up by name in the config, so the name must match an entry in hue_plugs
+# (or whatever autofill --save wrote into the config file).
+hue_suspend_plug: "PlugHiFi"   # plug to manage on system sleep
+hue_suspend_action: "stop"     # action on suspend/hibernate
+hue_wake_action: "restart"     # action on resume (restart = off, wait, on)
+
+# Deployed paths.
+hue_config_file: "/etc/hue-plugs.conf"
+hue_script_path: "/usr/local/bin/hue-plugs.py"
+hue_sleep_hook: "/etc/systemd/system-sleep/hue-plugs"
+
+# Packages to install (the script is stdlib-only, so python3 is enough).
+hue_packages:
+  - python3
