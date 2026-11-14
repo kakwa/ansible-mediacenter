@@ -1,0 +1,19 @@
+[Unit]
+Description=Kiosk idle manager (inhibitor-aware screen off + logind suspend gate)
+After=remote-fs.target cage-kodi.service cage-web.service cage-spotify.service user@{{ kodi_user_uid }}.service
+Wants=user@{{ kodi_user_uid }}.service
+
+[Service]
+Type=simple
+User={{ kodi_user }}
+Group={{ kodi_user }}
+Environment=HOME={{ kodi_home }}
+Environment=XDG_RUNTIME_DIR=/run/user/{{ kodi_user_uid }}
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ kodi_user_uid }}/bus
+Environment=KIOSK_SCREEN_OFF_AFTER={{ screen_off_after }}
+ExecStart=/usr/local/bin/kiosk-inhibit
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

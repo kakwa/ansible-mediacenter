@@ -1,14 +1,21 @@
 ---
 # Powersaving:
 #   * tlp (installed + enabled, default config)
-#   * idle screen-off: a small daemon that disables the foreground cage
-#     output (wlr-randr --off) once every kiosk TTY session has been idle
-#     for screen_off_after seconds, and re-enables it on the next input.
-#     (cage does not implement wlr-output-power-management-v1, so wlopm
-#     cannot be used; --off/--on on the output is safe for cage — verified.)
-#   * optional system suspend after suspend_after seconds idle via
-#     logind IdleAction (powersaving_suspend). NB: suspend can hang if
-#     Kodi holds open NFS handles.
+#   * kiosk-inhibit daemon: inhibitor-aware idle manager for the 3-TTY
+#     cage kiosk.
+#       - Screen off: disables the foreground cage's output (wlr-randr
+#         --off) while every cage is idle and no inhibitor cookie is
+#         held, re-enables it on the first input. (cage has no
+#         wlr-output-power-management-v1, so wlopm cannot be used;
+#         --off/--on on the output is safe for cage — verified.)
+#       - Suspend: holds a logind INHIBIT_IDLE lock (block mode) while
+#         any cage is active (input or zwp inhibitor via
+#         ext_idle_notify_v1) or any app holds a cookie (classic D-Bus
+#         ScreenSaver/SessionManager/PowerManagement, XDG portal); when
+#         the lock is released, logind IdleAction=suspend
+#         (powersaving_suspend) does the suspend through sleep.target /
+#         systemd-sleep, so the Hue power-cycle hooks fire.
+#         NB: suspend can hang if Kodi holds open NFS handles.
 
 - name: Powersaving packages
   ansible.builtin.apt:
@@ -34,34 +41,56 @@
 - name: logind idle action drop-in
   ansible.builtin.template:
     src: logind-idle.conf.j2
-    dest: /etc/systemd/logind.conf.d/99-kiosk-idle.conf
+    dest: /etc/systemd/logind.conf.d/10-kiosk-idle.conf
     owner: root
     group: root
     mode: "0644"
   notify: reload systemd-logind
 
-- name: Idle screen-off daemon script
+- name: kiosk-inhibit daemon
   ansible.builtin.template:
-    src: idle-off.sh.j2
-    dest: /usr/local/bin/kiosk-idle-off.sh
+    src: kiosk-inhibit.py.j2
+    dest: /usr/local/bin/kiosk-inhibit
     owner: root
     group: root
     mode: "0755"
-  notify: restart kiosk-idle-off
+  notify: restart kiosk-inhibit
 
-- name: Idle screen-off daemon unit
+- name: kiosk-inhibit unit
   ansible.builtin.template:
-    src: kiosk-idle-off.service.j2
-    dest: /etc/systemd/system/kiosk-idle-off.service
+    src: kiosk-inhibit.service.j2
+    dest: /etc/systemd/system/kiosk-inhibit.service
     owner: root
     group: root
     mode: "0644"
   notify:
     - reload systemd
-    - restart kiosk-idle-off
+    - restart kiosk-inhibit
 
-- name: Idle screen-off daemon enabled and running
+- name: legacy kiosk-idle-off unit present?
+  ansible.builtin.stat:
+    path: /etc/systemd/system/kiosk-idle-off.service
+  register: legacy_idle_off
+
+- name: stop and disable legacy kiosk-idle-off
   ansible.builtin.systemd:
     name: kiosk-idle-off
+    state: stopped
+    enabled: no
+  when: legacy_idle_off.stat.exists
+  notify: reload systemd
+
+- name: remove legacy kiosk-idle-off files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /usr/local/bin/kiosk-idle-off.sh
+    - /etc/systemd/system/kiosk-idle-off.service
+  notify: reload systemd
+
+- name: kiosk-inhibit daemon enabled and running
+  ansible.builtin.systemd:
+    name: kiosk-inhibit
     enabled: true
     state: started
