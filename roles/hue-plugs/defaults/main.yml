@@ -3,10 +3,11 @@
 # Philips Hue smart plugs.
 #
 # Installs a small stdlib-only Python CLI (/usr/local/bin/hue-plugs.py), a
-# JSON config file mapping human-readable names to Hue light IDs, and a
-# systemd system-sleep hook that stops the configured plug on suspend and
-# restarts it on resume. No daemon: the tool talks to the Hue bridge on
-# demand through the standard Hue HTTP API.
+# JSON config file mapping human-readable names to Hue light IDs, a systemd
+# system-sleep hook that stops the configured plug on suspend and restarts
+# it on resume, and a oneshot unit that powers the plug on at boot and off
+# at shutdown. No daemon: the tool talks to the Hue bridge on demand
+# through the standard Hue HTTP API.
 hue_plugs_enable: true
 
 # Hue bridge address and client key (the "username" the bridge returns when
@@ -27,7 +28,7 @@ hue_client_key: ""
 # with hue_bridge_ip / hue_client_key.
 # Example:
 #   - id: "1"
-#     name: "PlugHifi"
+#     name: "PlugHiFi"
 hue_plugs: []
 
 # Seconds to wait between powering off and back on for `hue-plugs restart`,
@@ -42,10 +43,23 @@ hue_suspend_plug: "PlugHiFi"   # plug to manage on system sleep
 hue_suspend_action: "stop"     # action on suspend/hibernate
 hue_wake_action: "restart"     # action on resume (restart = off, wait, on)
 
+# Boot/shutdown behaviour (hue-plugs-power.service, a oneshot unit kept
+# active with RemainAfterExit so its ExecStop runs while the network is
+# still up).  At boot it waits for the bridge, then runs the action; at
+# shutdown the ExecStop action cuts the device's power.
+hue_boot_action: "start"       # action at boot
+hue_shutdown_action: "stop"    # action at shutdown/reboot
+
 # Deployed paths.
 hue_config_file: "/etc/hue-plugs.conf"
 hue_script_path: "/usr/local/bin/hue-plugs.py"
-hue_sleep_hook: "/etc/systemd/system-sleep/hue-plugs"
+# systemd-sleep only executes hooks in its own directory (since v262 the
+# man page documents /usr/lib/systemd/system-sleep/; /etc/systemd/system-sleep/
+# is NOT read). Debian's /lib is merged into /usr/lib.
+hue_sleep_hook: "/usr/lib/systemd/system-sleep/hue-plugs"
+hue_power_script: "/usr/local/bin/hue-plugs-power"
+hue_power_service: "hue-plugs-power"
+hue_power_unit: "/etc/systemd/system/{{ hue_power_service }}.service"
 
 # Packages to install (the script is stdlib-only, so python3 is enough).
 hue_packages:

@@ -72,16 +72,16 @@ default_audio_device: usb-.*
 default_audio_priority: 1200
 
 # Hue smart plugs (role: hue-plugs)
-# The box suspends/restarts the "PlugHifi" plug on system sleep:
+# The box suspends/restarts the "PlugHiFi" plug on system sleep:
 #   pre suspend  -> stop   (device loses power while the box sleeps)
 #   post resume  -> restart (off, wait hue_restart_delay, on)
-# hue_suspend_plug: "PlugHifi"   # already the default
+# hue_suspend_plug: "PlugHiFi"   # already the default
 # First deploy without credentials (the role prints pairing instructions);
 # after `hue-plugs.py setup --save` + `autofill --save` on the box, fill in:
 # hue_bridge_ip: "192.168.1.x"
 # hue_client_key: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 # hue_plugs:
-#   - { id: "1", name: "PlugHifi" }
+#   - { id: "1", name: "PlugHiFi" }
 # and re-run the playbook so Ansible manages /etc/hue-plugs.conf.
 
 # Power

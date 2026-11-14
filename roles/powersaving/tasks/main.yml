@@ -8,6 +8,10 @@
 #         held, re-enables it on the first input. (cage has no
 #         wlr-output-power-management-v1, so wlopm cannot be used;
 #         --off/--on on the output is safe for cage — verified.)
+#         The foreground output is detected from wlr-randr's header
+#         line (>= 0.4 no longer prints '(connected)'), and its actual
+#         Enabled state is reconciled every tick so VT switches cannot
+#         leave us out of sync.
 #       - Suspend: holds a logind INHIBIT_IDLE lock (block mode) while
 #         any cage is active (input or zwp inhibitor via
 #         ext_idle_notify_v1) or any app holds a cookie (classic D-Bus
@@ -15,6 +19,10 @@
 #         the lock is released, logind IdleAction=suspend
 #         (powersaving_suspend) does the suspend through sleep.target /
 #         systemd-sleep, so the Hue power-cycle hooks fire.
+#         Releasing the last D-Bus cookie starts a fresh
+#         screen_off_after grace period: those inhibitors are invisible
+#         to cage, whose idle state would otherwise be stale and blank
+#         the screen immediately.
 #         NB: suspend can hang if Kodi holds open NFS handles.
 
 - name: Powersaving packages
@@ -38,13 +46,24 @@
     group: root
     mode: "0755"
 
+# Name this 99-* so it wins over any earlier drop-in (10-*, 50-*, ...).
+# Drop-ins are merged in filename order, so a stray 99 file from a manual
+# override is itself replaced by this one and suspend_after takes effect.
 - name: logind idle action drop-in
   ansible.builtin.template:
     src: logind-idle.conf.j2
-    dest: /etc/systemd/logind.conf.d/10-kiosk-idle.conf
+    dest: /etc/systemd/logind.conf.d/99-kiosk-idle.conf
     owner: root
     group: root
     mode: "0644"
+  notify: reload systemd-logind
+
+# Pre-99 deployments used 10-kiosk-idle.conf; drop it so there is a
+# single source of truth for IdleAction/IdleActionSec.
+- name: remove legacy logind idle drop-in
+  ansible.builtin.file:
+    path: /etc/systemd/logind.conf.d/10-kiosk-idle.conf
+    state: absent
   notify: reload systemd-logind
 
 - name: kiosk-inhibit daemon

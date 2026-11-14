@@ -1,0 +1,56 @@
+#!/bin/sh
+# Boot/shutdown power hook for the plug managed by hue-plugs
+# (managed by Ansible).
+#
+#   hue-plugs-power start    -> wait for the bridge, then power the plug on
+#   hue-plugs-power stop     -> power the plug off (shutdown)
+#   hue-plugs-power restart  -> wait for the bridge, then off/wait/on
+#
+# Invoked by hue-plugs-power.service: start at boot, stop at shutdown.
+# All activity is appended to /var/log/hue-plugs-power.log; the service's
+# own stdout/stderr also goes to the journal.
+
+set -u
+
+ACTION="${1:-}"
+
+HUE_PLUGS={{ hue_script_path }}
+CONFIG={{ hue_config_file }}
+PLUG={{ hue_suspend_plug }}
+LOG=/var/log/hue-plugs-power.log
+
+log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG" 2>/dev/null || true; }
+
+case "$ACTION" in
+    start|stop|restart) ;;
+    *)
+        echo "usage: $0 start|stop|restart" >&2
+        exit 2
+        ;;
+esac
+
+# Dormant until the config file exists (created by `hue-plugs.py setup`).
+if [ ! -r "$CONFIG" ]; then
+    log "$ACTION $PLUG: no config at $CONFIG, skipping"
+    exit 0
+fi
+
+case "$ACTION" in
+    start|restart)
+        # At boot the bridge may need a moment after the network is up.
+        i=0
+        while [ "$i" -lt 15 ]; do
+            "$HUE_PLUGS" ping >> "$LOG" 2>&1 && break
+            i=$((i + 1))
+            [ "$i" -lt 15 ] && sleep 2
+        done
+        [ "$i" -ge 15 ] && log "$ACTION: bridge still unreachable after retries"
+        ;;
+esac
+
+if "$HUE_PLUGS" "$ACTION" "$PLUG" >> "$LOG" 2>&1; then
+    log "$ACTION $PLUG: ok"
+else
+    log "$ACTION $PLUG: FAILED"
+    exit 1
+fi

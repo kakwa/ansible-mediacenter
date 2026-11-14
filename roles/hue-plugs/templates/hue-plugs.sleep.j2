@@ -3,10 +3,15 @@
 #
 # Power-manages the device behind the "{{ hue_suspend_plug }}" Hue plug when
 # the box suspends/resumes:
-#   pre  suspend|hibernate|hybrid-sleep -> {{ hue_suspend_action }} the plug
-#        (runs while the network is still up)
-#   post resume|thaw                    -> {{ hue_wake_action }} the plug
-#        (waits until the bridge answers again, at most ~30 s)
+#   pre  suspend|hibernate|hybrid-sleep|suspend-then-hibernate
+#        -> {{ hue_suspend_action }} the plug (network still up)
+#   post suspend|hibernate|hybrid-sleep|suspend-then-hibernate
+#        -> {{ hue_wake_action }} the plug (waits until the bridge
+#           answers again, at most ~30 s)
+#
+# NB: systemd passes the *sleep operation* as the second argument for
+# both pre and post, not "resume"/"thaw". Matching only "post resume"
+# meant the wake action never ran on a real suspend.
 #
 # All activity is appended to /var/log/hue-plugs-sleep.log.
 
@@ -36,11 +41,13 @@ run() {
 }
 
 case "$1 $2" in
-    "pre suspend"|"pre hibernate"|"pre hybrid-sleep")
+    "pre suspend"|"pre hibernate"|"pre hybrid-sleep"|"pre suspend-then-hibernate")
         log "pre $2: {{ hue_suspend_action }} $PLUG"
         run {{ hue_suspend_action }}
         ;;
-    "post resume"|"post thaw")
+    # "post resume"/"post thaw" are kept for manual runs and older hooks;
+    # systemd itself uses the operation name on both sides.
+    "post suspend"|"post hibernate"|"post hybrid-sleep"|"post suspend-then-hibernate"|"post resume"|"post thaw")
         # After resume the network may need a moment; wait until the bridge
         # answers (up to ~30 s) before acting.
         i=0

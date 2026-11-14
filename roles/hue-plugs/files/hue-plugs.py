@@ -608,10 +608,14 @@ def cmd_ping(cfg: dict) -> int:
 
     Used by the systemd sleep hook to wait for the network to come back
     after resume (and handy for debugging reachability in general).
+    ``/config`` is the v1 endpoint that carries the bridge name and
+    software version; unknown endpoints return a JSON *list* of errors.
     """
-    raw = api_request(cfg["bridge_ip"], cfg["client_key"], "GET", "/bridge")
+    raw = api_request(cfg["bridge_ip"], cfg["client_key"], "GET", "/config")
+    if not isinstance(raw, dict):
+        raise HuePlugsError(f"unexpected response from bridge: {raw!r}")
     print(f"bridge reachable: {raw.get('name', cfg['bridge_ip'])} "
-          f"(SW {raw.get('softwareversion', '?')})")
+          f"(SW {raw.get('swversion', raw.get('softwareversion', '?'))})")
     return 0
 
 

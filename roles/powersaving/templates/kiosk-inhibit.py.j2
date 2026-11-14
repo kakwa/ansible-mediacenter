@@ -37,6 +37,12 @@ Behaviour:
     does the actual suspend through sleep.target / systemd-sleep, so the
     Hue power-cycle hooks fire.
 
+  * Inhibitor release: D-Bus inhibitors are invisible to cage, so when
+    the last cookie is released all cages may already be marked idle.
+    A fresh SCREEN_OFF_AFTER grace period is then started, otherwise the
+    screen would blank (and suspend would be allowed) immediately
+    instead of after the usual idle timeout.
+
 Configuration (set by the unit):
   KIOSK_SCREEN_OFF_AFTER  seconds of cage idleness before screen off
   XDG_RUNTIME_DIR         user runtime dir holding the wayland sockets
@@ -62,6 +68,11 @@ import gi
 gi.require_version("GLib", "2.0")
 from gi.repository import GLib
 
+try:
+    from gi.repository import GLibUnix
+except ImportError:  # PyGObject < 3.44 / GLib without the Unix namespace
+    GLibUnix = None
+
 from pywayland.client.display import Display
 from pywayland.protocol.ext_idle_notify_v1 import ExtIdleNotifierV1
 from pywayland.protocol.wayland import WlSeat
@@ -75,7 +86,7 @@ WLR_TIMEOUT = 5    # s
 
 
 def wlr_randr(sock_path, *args):
-    """Run wlr-randr against one cage's socket; '' on any error."""
+    """Run wlr-randr against one cage's socket; None on any error."""
     env = dict(os.environ)
     env["WAYLAND_DISPLAY"] = os.path.basename(sock_path)
     try:
@@ -85,26 +96,58 @@ def wlr_randr(sock_path, *args):
         )
     except Exception as e:
         log.debug("wlr-randr %r: %r", args, e)
-        return ""
+        return None
     if p.returncode != 0:
         log.debug("wlr-randr %r rc=%d: %s",
                   args, p.returncode, p.stderr.strip())
-        return ""
+        return None
     return p.stdout
 
 
-def foreground_output(cages):
-    """Return (sock_path, output_name) of the cage owning the display.
+def parse_outputs(text):
+    """Yield (name, enabled) for each output block in wlr-randr output.
 
-    Sockets are tried in creation order; only the foreground cage
-    reports a connected output, so the first one that does is the
-    foreground.  (path, name) are (None, None) when there is none.
+    wlr-randr >= 0.4 dropped the '(connected)' marker: an output is now
+    just a non-indented header line followed by indented properties,
+    with 'Enabled: yes|no'.  Older versions append '(connected)' or
+    '(disconnected)' to the header; disconnected outputs are skipped.
+    enabled is None when the version does not report it.
+    """
+    name = enabled = None
+    for line in text.splitlines():
+        if not line:
+            continue
+        if not line[0].isspace():
+            if name is not None:
+                yield name, enabled
+            name = enabled = None
+            if "disconnected" not in line:
+                name = line.split()[0]
+            continue
+        if name is not None and line.strip().startswith("Enabled:"):
+            value = line.split(":", 1)[1].strip().lower()
+            enabled = value == "yes"
+    if name is not None:
+        yield name, enabled
+
+
+def foreground_output(cages):
+    """Return (sock_path, output_name, enabled) of the cage owning the
+    display.
+
+    Sockets are tried in creation order; only the foreground cage has
+    an output (wlroots destroys it when the VT is lost), so the first
+    one that reports one is the foreground.  enabled is True/False, or
+    None if wlr-randr does not say.  Returns (None, None, None) when
+    there is no output.
     """
     for path in sorted(cages):
-        for line in wlr_randr(path).splitlines():
-            if "connected" in line:
-                return path, line.split()[0]
-    return None, None
+        text = wlr_randr(path)
+        if text is None:
+            continue
+        for name, enabled in parse_outputs(text):
+            return path, name, enabled
+    return None, None, None
 
 
 class CageClient:
@@ -360,6 +403,8 @@ class Kiosk:
         self._logind_bus = None
         self._logind_mgr = None
         self._lock_fd = None
+        self._grace_until = 0.0
+        self._no_output_warned = False
 
     # -- inhibitor cookies ------------------------------------------------
 
@@ -390,6 +435,14 @@ class Kiosk:
         if sender is None:
             return
         log.info("inhibit cookie %d released (%s)", cookie, sender)
+        # D-Bus inhibitors are invisible to the compositor.  If the cages
+        # already went idle while the cookie was held, their idle state is
+        # stale, so releasing the last cookie would otherwise blank the
+        # screen (and allow suspend) immediately instead of after the
+        # usual timeout.  Restart the countdown.
+        if not self.cookies:
+            self._grace_until = time.monotonic() + SCREEN_OFF_AFTER
+            log.info("idle countdown restarted (%ds)", SCREEN_OFF_AFTER)
         self.state_changed()
 
     # -- logind INHIBIT_IDLE lock -----------------------------------------
@@ -404,6 +457,8 @@ class Kiosk:
         return self._logind_mgr
 
     def _lock_wanted(self):
+        if time.monotonic() < self._grace_until:
+            return True
         return bool(self.cookies) or any(
             c.active for c in self.cages.values())
 
@@ -454,22 +509,36 @@ class Kiosk:
 
     def _sync_screen(self):
         want_off = bool(self.cages) and not self._lock_wanted()
-        if want_off == self.screen_off:
+        path, name, enabled = foreground_output(self.cages)
+        if not name:
+            if want_off != self.screen_off and not self._no_output_warned:
+                log.warning("want screen %s but no foreground output",
+                            "off" if want_off else "on")
+                self._no_output_warned = True
+            return
+        self._no_output_warned = False
+
+        # Reconcile against the compositor instead of trusting our own
+        # flag: wlroots destroys/recreates the output on VT switches, so
+        # the screen can come back on while we still think it is off.
+        screen_off_now = self.screen_off if enabled is None else not enabled
+        if want_off == screen_off_now:
+            self.screen_off = screen_off_now
             return
         if want_off:
-            path, name = foreground_output(self.cages)
-            if not name:
-                log.warning("want screen off but no foreground output")
+            if wlr_randr(path, "--output", name, "--off") is None:
+                log.warning("wlr-randr --off failed: %s (%s)",
+                            name, os.path.basename(path))
                 return
-            wlr_randr(path, "--output", name, "--off")
             self.screen_off = True
             log.info("screen off: %s (%s)", name, os.path.basename(path))
         else:
-            path, name = foreground_output(self.cages)
-            if name:
-                wlr_randr(path, "--output", name, "--on")
-                log.info("screen on: %s (%s)", name, os.path.basename(path))
+            if wlr_randr(path, "--output", name, "--on") is None:
+                log.warning("wlr-randr --on failed: %s (%s)",
+                            name, os.path.basename(path))
+                return
             self.screen_off = False
+            log.info("screen on: %s (%s)", name, os.path.basename(path))
 
     # -- state machine -----------------------------------------------------
 
@@ -537,7 +606,10 @@ def main():
         loop.quit()
         return False
 
-    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, _sigterm)
+    if GLibUnix is not None:
+        GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, _sigterm)
+    else:
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, _sigterm)
 
     log.info("kiosk-inhibit started (screen_off_after=%ds)", SCREEN_OFF_AFTER)
     try:

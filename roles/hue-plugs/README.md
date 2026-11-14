@@ -3,9 +3,13 @@
 Installs a stdlib-only Python CLI (`/usr/local/bin/hue-plugs.py`) for
 controlling Philips Hue smart plugs on the box. No daemon is involved --
 the tool talks to the Hue bridge on demand through the standard Hue HTTP
-API. It also installs a systemd **system-sleep hook**
-(`/etc/systemd/system-sleep/hue-plugs`) that powers the plug off on
-suspend and powers the device back on on resume.
+API. It also installs:
+
+- a systemd **system-sleep hook**
+  (`/usr/lib/systemd/system-sleep/hue-plugs`) that powers the plug off on
+  suspend and powers the device back on on resume;
+- a oneshot **boot/shutdown unit** (`hue-plugs-power.service`) that powers
+  the plug on at boot and off at shutdown/reboot.
 
 ## Usage
 
@@ -35,15 +39,39 @@ The system-sleep hook runs on every system sleep transition:
 
 | transition | action |
 | --- | --- |
-| `pre suspend` / `pre hibernate` | `hue-plugs.py stop <plug>` (network still up) |
-| `post resume` / `post thaw` | waits until the bridge answers (≤ ~30 s), then `hue-plugs.py restart <plug>` |
+| `pre suspend` / `pre hibernate` / `pre hybrid-sleep` / `pre suspend-then-hibernate` | `hue-plugs.py stop <plug>` (network still up) |
+| `post suspend` / `post hibernate` / `post hybrid-sleep` / `post suspend-then-hibernate` | waits until the bridge answers (≤ ~30 s), then `hue-plugs.py restart <plug>` |
 
-`<plug>` is `hue_suspend_plug` (default `PlugHifi`); the pre-sleep and
+`<plug>` is `hue_suspend_plug` (default `PlugHiFi`); the pre-sleep and
 wake actions are configurable (`hue_suspend_action`, `hue_wake_action`).
 All activity is logged to `/var/log/hue-plugs-sleep.log`.
 
+Note that systemd passes the sleep operation (`suspend`, `hibernate`, …)
+as the second argument on **both** the pre and post call, not
+`resume`/`thaw`.
+
+The hook lives in `/usr/lib/systemd/system-sleep/`, the only directory
+`systemd-sleep` scans (`/etc/systemd/system-sleep/` is **not** read).
 The hook is **dormant until the config file exists** on the box: it logs a
 "no config" line and exits, so it is safe to deploy before pairing.
+
+## Boot / shutdown behaviour
+
+`hue-plugs-power.service` is a `Type=oneshot` unit with
+`RemainAfterExit=yes`, so its `ExecStop` still runs while the network is
+up during shutdown:
+
+| event | action |
+| --- | --- |
+| boot (unit start) | waits until the bridge answers (≤ ~30 s), then `hue-plugs.py start <plug>` |
+| shutdown / reboot (unit stop) | `hue-plugs.py stop <plug>` |
+| role run when already active | leaves the unit alone (no power cycle) |
+
+`<plug>` is the same `hue_suspend_plug` used by the sleep hook; the boot
+and shutdown actions are configurable (`hue_boot_action`,
+`hue_shutdown_action`). The wrapper is `/usr/local/bin/hue-plugs-power`
+and logs to `/var/log/hue-plugs-power.log` (plus the journal). Like the
+sleep hook, it is dormant until the config file exists.
 
 ## Role Variables
 
@@ -56,12 +84,17 @@ Variables (see `defaults/main.yml`):
 | `hue_client_key` | *(empty)* | Hue client key (paired username); required to manage the config |
 | `hue_plugs` | `[]` | List of `{id, name}` plug entries; required to manage the config |
 | `hue_restart_delay` | `15` | Seconds to wait between off and on during `restart` |
-| `hue_suspend_plug` | `PlugHifi` | Plug name managed by the sleep hook |
+| `hue_suspend_plug` | `PlugHiFi` | Plug name managed by the sleep hook |
 | `hue_suspend_action` | `stop` | Hook action on suspend/hibernate |
 | `hue_wake_action` | `restart` | Hook action on resume (`restart` = off, wait, on) |
+| `hue_boot_action` | `start` | Plug action when the boot/shutdown unit starts |
+| `hue_shutdown_action` | `stop` | Plug action when the boot/shutdown unit stops |
 | `hue_config_file` | `/etc/hue-plugs.conf` | Config file path on the target |
 | `hue_script_path` | `/usr/local/bin/hue-plugs.py` | Script install path |
-| `hue_sleep_hook` | `/etc/systemd/system-sleep/hue-plugs` | Sleep hook path |
+| `hue_sleep_hook` | `/usr/lib/systemd/system-sleep/hue-plugs` | Sleep hook path (systemd-sleep only reads `/usr/lib/systemd/system-sleep/`) |
+| `hue_power_script` | `/usr/local/bin/hue-plugs-power` | Boot/shutdown wrapper path |
+| `hue_power_service` | `hue-plugs-power` | Boot/shutdown service name |
+| `hue_power_unit` | `/etc/systemd/system/{{ hue_power_service }}.service` | Unit file path |
 | `hue_packages` | `[python3]` | Packages to install |
 
 ## Playbook Usage
@@ -85,7 +118,7 @@ playbook (vault recommended) and fill in the plug list:
     hue_client_key: "{{ vault_hue_client_key | default(lookup('file', playbook_dir ~ '/hue_bridge_key.txt') | trim, true) }}"
     hue_plugs:
       - id: "1"
-        name: "PlugHifi"
+        name: "PlugHiFi"
 ```
 
 Once `hue_bridge_ip`/`hue_client_key` are set, Ansible manages
@@ -118,7 +151,7 @@ discovered 3 device(s) on the bridge
 
 HUE ID     NAME                 ROOM                 TYPE
 ----------------------------------------------------------------------
-1          PlugHifi             HiFi                 On/Off plug-in unit
+1          PlugHiFi             HiFi                 On/Off plug-in unit
 6          PlugPcIA             Office               On/Off plug-in unit
 9          Hue Bulb             Office               Dimmable light
 ```
@@ -126,7 +159,7 @@ HUE ID     NAME                 ROOM                 TYPE
 ```yaml
   hue_plugs:
     - id: "1"
-      name: "PlugHifi"
+      name: "PlugHiFi"
     - id: "6"
       name: "PlugPcIA"
 ```

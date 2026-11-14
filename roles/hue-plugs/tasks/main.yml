@@ -21,13 +21,14 @@
 
 - name: Create system-sleep hook directory
   ansible.builtin.file:
-    path: /etc/systemd/system-sleep
+    path: "{{ hue_sleep_hook | dirname }}"
     state: directory
     owner: root
     group: root
     mode: '0755'
   when: hue_plugs_enable
   become: true
+  tags: [hue-plugs-sleep]
 
 - name: Deploy hue-plugs system-sleep hook
   ansible.builtin.template:
@@ -38,6 +39,53 @@
     mode: '0755'
   when: hue_plugs_enable
   become: true
+  tags: [hue-plugs-sleep]
+
+# Older revisions deployed the hook to /etc/systemd/system-sleep, which
+# systemd-sleep never executes. Remove the stale copy.
+- name: Remove legacy hue-plugs system-sleep hook
+  ansible.builtin.file:
+    path: /etc/systemd/system-sleep/hue-plugs
+    state: absent
+  when: hue_plugs_enable
+  become: true
+  tags: [hue-plugs-sleep]
+
+- name: Deploy hue-plugs boot/shutdown wrapper
+  ansible.builtin.template:
+    src: hue-plugs-power.sh.j2
+    dest: "{{ hue_power_script }}"
+    owner: root
+    group: root
+    mode: '0755'
+  when: hue_plugs_enable
+  become: true
+  tags: [hue-plugs-power]
+
+- name: Deploy hue-plugs boot/shutdown unit
+  ansible.builtin.template:
+    src: hue-plugs-power.service.j2
+    dest: "{{ hue_power_unit }}"
+    owner: root
+    group: root
+    mode: '0644'
+  when: hue_plugs_enable
+  become: true
+  tags: [hue-plugs-power]
+
+# RemainAfterExit keeps the oneshot unit active after boot, so its
+# ExecStop runs while the network is still up at shutdown. If the unit is
+# already active Ansible leaves it alone (starting it again would power
+# the plug off and on via ExecStop/ExecStart).
+- name: Enable and start hue-plugs boot/shutdown unit
+  ansible.builtin.systemd:
+    name: "{{ hue_power_service }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: hue_plugs_enable
+  become: true
+  tags: [hue-plugs-power]
 
 - name: Check hue-plugs configuration
   ansible.builtin.assert:
@@ -83,8 +131,8 @@
       - "Once the bridge IP and client key (printed by setup) are recorded"
       - "in the playbook (hue_bridge_ip / hue_client_key, e.g. via vault)"
       - "and hue_plugs is filled in, re-run the playbook: Ansible then"
-      - "manages {{ hue_config_file }} itself. The suspend/resume hook"
-      - "stays dormant until {{ hue_config_file }} exists."
+      - "manages {{ hue_config_file }} itself. The suspend/resume and"
+      - "boot/shutdown hooks stay dormant until {{ hue_config_file }} exists."
   when:
     - hue_plugs_enable
     - hue_bridge_ip | length == 0 or hue_client_key | length == 0

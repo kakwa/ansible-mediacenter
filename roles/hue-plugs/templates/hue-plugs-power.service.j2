@@ -1,0 +1,15 @@
+[Unit]
+Description=Power the {{ hue_suspend_plug }} Hue plug on at boot and off at shutdown
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart={{ hue_power_script }} {{ hue_boot_action }}
+ExecStop={{ hue_power_script }} {{ hue_shutdown_action }}
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
