@@ -85,8 +85,8 @@ default_audio_priority: 1200
 # and re-run the playbook so Ansible manages /etc/hue-plugs.conf.
 
 # Power
-screen_off_after: 30      # seconds idle -> screen off
-suspend_after: 60         # seconds idle -> system suspend
+screen_off_after: 600      # seconds idle -> screen off
+suspend_after: 900         # seconds idle -> system suspend
 # NB: suspend can hang if Kodi holds open NFS handles; set
 # powersaving_suspend: false to disable it.
 powersaving_suspend: true
