@@ -51,7 +51,7 @@ kiosk_tys:
 
 # Box-specific browser URLs.
 kiosk_browser:
-  web_url: https://duckduckgo.com
+  web_url: https://www.youtube.com
   spotify_url: https://open.spotify.com
 
 # Kodi
