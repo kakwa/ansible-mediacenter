@@ -24,6 +24,9 @@
 #         to cage, whose idle state would otherwise be stale and blank
 #         the screen immediately.
 #         NB: suspend can hang if Kodi holds open NFS handles.
+#
+# The daemon itself is a fixed script (files/kiosk-inhibit.py); its
+# tunables are rendered into /etc/kiosk-inhibit.conf.
 
 - name: Powersaving packages
   ansible.builtin.apt:
@@ -67,12 +70,21 @@
   notify: reload systemd-logind
 
 - name: kiosk-inhibit daemon
-  ansible.builtin.template:
-    src: kiosk-inhibit.py.j2
+  ansible.builtin.copy:
+    src: kiosk-inhibit.py
     dest: /usr/local/bin/kiosk-inhibit
     owner: root
     group: root
     mode: "0755"
+  notify: restart kiosk-inhibit
+
+- name: kiosk-inhibit configuration
+  ansible.builtin.template:
+    src: kiosk-inhibit.conf.j2
+    dest: "{{ kiosk_inhibit_config_file }}"
+    owner: root
+    group: root
+    mode: "0644"
   notify: restart kiosk-inhibit
 
 - name: kiosk-inhibit unit

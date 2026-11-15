@@ -8,10 +8,7 @@ Type=simple
 User={{ kodi_user }}
 Group={{ kodi_user }}
 Environment=HOME={{ kodi_home }}
-Environment=XDG_RUNTIME_DIR=/run/user/{{ kodi_user_uid }}
-Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ kodi_user_uid }}/bus
-Environment=KIOSK_SCREEN_OFF_AFTER={{ screen_off_after }}
-ExecStart=/usr/local/bin/kiosk-inhibit
+ExecStart=/usr/local/bin/kiosk-inhibit --config {{ kiosk_inhibit_config_file }}
 Restart=always
 RestartSec=2
 

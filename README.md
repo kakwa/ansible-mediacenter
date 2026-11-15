@@ -37,4 +37,5 @@ ansible-playbook -i inventory/hosts.yml site.yml
   (`2:21.3+dfsg-*`); the old `5:21.3-dmo0` package must be purged first.
 - kakwa's home on the box is `/var/lib/xbmc` (see /etc/passwd), not `/home/kakwa`.
 - Kodi config lives in `/var/lib/xbmc/.kodi`.
-- Suspend timeouts live in group_vars; the powersaving role renders them.
+- Suspend timeouts live in group_vars; the powersaving role renders them into
+  the logind drop-in and `/etc/kiosk-inhibit.conf`.

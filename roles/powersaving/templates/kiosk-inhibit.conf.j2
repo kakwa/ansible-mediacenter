@@ -1,0 +1,22 @@
+# kiosk-inhibit configuration, managed by Ansible.
+# Restart the unit after changing it: systemctl restart kiosk-inhibit
+
+[idle]
+# Seconds all cages must be idle before the foreground output is
+# disabled.  Releasing the last D-Bus inhibitor restarts this countdown.
+screen_off_after = {{ screen_off_after }}
+
+[wayland]
+# Directory holding the cage Wayland sockets (wayland-*).  Sockets
+# appear lazily the first time each VT is visited.
+runtime_dir = {{ kiosk_inhibit_runtime_dir }}
+
+[dbus]
+# Shared session bus of the kiosk user; all three cage sessions use it.
+session_bus_address = {{ kiosk_inhibit_session_bus_address }}
+
+[timing]
+# Seconds between socket scans and state re-evaluation.
+scan_interval = {{ kiosk_inhibit_scan_interval }}
+# Timeout in seconds for each wlr-randr invocation.
+wlr_randr_timeout = {{ kiosk_inhibit_wlr_timeout }}

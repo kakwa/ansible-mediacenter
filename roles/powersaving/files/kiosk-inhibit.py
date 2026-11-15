@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """kiosk-inhibit — inhibitor-aware idle manager for the 3-TTY cage kiosk.
 
-Watches all cage instances (wayland sockets under $XDG_RUNTIME_DIR, which
-appear lazily as each VT is first visited) through ext_idle_notify_v1,
-whose 'idled' event fires only when the cage has seen no input for the
-timeout AND holds no active zwp_idle_inhibit_manager_v1 inhibitor;
-'resumed' fires on input or inhibitor changes.  Media playback (Kodi's
-transient zwp inhibitor, Firefox's wake locks) therefore keeps a cage
-"active" here.
+Watches all cage instances (wayland sockets under the configured runtime
+directory, which appear lazily as each VT is first visited) through
+ext_idle_notify_v1, whose 'idled' event fires only when the cage has
+seen no input for the timeout AND holds no active
+zwp_idle_inhibit_manager_v1 inhibitor; 'resumed' fires on input or
+inhibitor changes.  Media playback (Kodi's transient zwp inhibitor,
+Firefox's wake locks) therefore keeps a cage "active" here.
 
 Also registers as the inhibitor endpoints on the shared session bus, so
 that apps reach us through whichever classic mechanism they support:
@@ -39,16 +39,21 @@ Behaviour:
 
   * Inhibitor release: D-Bus inhibitors are invisible to cage, so when
     the last cookie is released all cages may already be marked idle.
-    A fresh SCREEN_OFF_AFTER grace period is then started, otherwise the
+    A fresh screen_off_after grace period is then started, otherwise the
     screen would blank (and suspend would be allowed) immediately
     instead of after the usual idle timeout.
 
-Configuration (set by the unit):
-  KIOSK_SCREEN_OFF_AFTER  seconds of cage idleness before screen off
-  XDG_RUNTIME_DIR         user runtime dir holding the wayland sockets
-  DBUS_SESSION_BUS_ADDRESS  shared session bus of the kiosk user
+Configuration (INI file, default /etc/kiosk-inhibit.conf, override with
+--config or KIOSK_INHIBIT_CONFIG):
+  [idle]     screen_off_after       seconds of cage idleness before screen off
+  [wayland]  runtime_dir            user runtime dir holding the wayland sockets
+  [dbus]     session_bus_address    shared session bus of the kiosk user
+  [timing]   scan_interval          seconds between socket scans
+             wlr_randr_timeout      seconds per wlr-randr invocation
 """
 
+import argparse
+import configparser
 import glob
 import logging
 import os
@@ -57,6 +62,7 @@ import stat
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 
 import dbus
 import dbus.bus
@@ -79,20 +85,70 @@ from pywayland.protocol.wayland import WlSeat
 
 log = logging.getLogger("kiosk-inhibit")
 
-SCREEN_OFF_AFTER = int(os.environ.get("KIOSK_SCREEN_OFF_AFTER", "3600"))
-XDG_RUNTIME_DIR = os.environ.get("XDG_RUNTIME_DIR", "/run/user/1001")
-SCAN_INTERVAL = 2  # s: socket scan + state re-evaluation
-WLR_TIMEOUT = 5    # s
+DEFAULT_CONFIG_PATH = "/etc/kiosk-inhibit.conf"
 
 
-def wlr_randr(sock_path, *args):
+@dataclass(frozen=True)
+class Config:
+    screen_off_after: int
+    runtime_dir: str
+    session_bus_address: str
+    scan_interval: int
+    wlr_timeout: int
+
+
+def load_config(path):
+    """Read the INI configuration; missing keys fall back to defaults."""
+    parser = configparser.ConfigParser(interpolation=None)
+    with open(path, encoding="utf-8") as f:
+        parser.read_file(f)
+
+    runtime_dir = parser.get(
+        "wayland", "runtime_dir",
+        fallback=os.environ.get("XDG_RUNTIME_DIR", "/run/user/1001"))
+    config = Config(
+        screen_off_after=parser.getint(
+            "idle", "screen_off_after", fallback=3600),
+        runtime_dir=runtime_dir,
+        session_bus_address=parser.get(
+            "dbus", "session_bus_address",
+            fallback="unix:path=%s/bus" % runtime_dir),
+        scan_interval=parser.getint("timing", "scan_interval", fallback=2),
+        wlr_timeout=parser.getint(
+            "timing", "wlr_randr_timeout", fallback=5),
+    )
+    if config.screen_off_after <= 0:
+        raise ValueError("screen_off_after must be positive")
+    if config.scan_interval <= 0:
+        raise ValueError("scan_interval must be positive")
+    if config.wlr_timeout <= 0:
+        raise ValueError("wlr_randr_timeout must be positive")
+    if not config.runtime_dir:
+        raise ValueError("runtime_dir must not be empty")
+    if not config.session_bus_address:
+        raise ValueError("session_bus_address must not be empty")
+    return config
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="inhibitor-aware idle manager for the cage kiosk")
+    parser.add_argument(
+        "-c", "--config",
+        default=os.environ.get("KIOSK_INHIBIT_CONFIG", DEFAULT_CONFIG_PATH),
+        help="INI configuration file (default: %(default)s)")
+    return parser.parse_args()
+
+
+def wlr_randr(config, sock_path, *args):
     """Run wlr-randr against one cage's socket; None on any error."""
     env = dict(os.environ)
     env["WAYLAND_DISPLAY"] = os.path.basename(sock_path)
+    env["XDG_RUNTIME_DIR"] = config.runtime_dir
     try:
         p = subprocess.run(
             ["wlr-randr", *args], env=env,
-            capture_output=True, text=True, timeout=WLR_TIMEOUT,
+            capture_output=True, text=True, timeout=config.wlr_timeout,
         )
     except Exception as e:
         log.debug("wlr-randr %r: %r", args, e)
@@ -131,7 +187,7 @@ def parse_outputs(text):
         yield name, enabled
 
 
-def foreground_output(cages):
+def foreground_output(config, cages):
     """Return (sock_path, output_name, enabled) of the cage owning the
     display.
 
@@ -142,7 +198,7 @@ def foreground_output(cages):
     there is no output.
     """
     for path in sorted(cages):
-        text = wlr_randr(path)
+        text = wlr_randr(config, path)
         if text is None:
             continue
         for name, enabled in parse_outputs(text):
@@ -204,7 +260,7 @@ class CageClient:
         self.io_watch = GLib.io_add_watch(
             display.get_fd(), GLib.IO_IN, self._on_readable)
         log.info("cage %s: watching (idle after %ds)",
-                 self.path, SCREEN_OFF_AFTER)
+                 self.path, self.kiosk.config.screen_off_after)
 
     def _on_global(self, registry, name, iface, version):
         if iface == "wl_seat" and self._seat is None:
@@ -217,7 +273,7 @@ class CageClient:
         if (self._seat is not None and self._notifier is not None
                 and self._notification is None and not self.dead):
             notif = self._notifier.get_idle_notification(
-                SCREEN_OFF_AFTER * 1000, self._seat)
+                self.kiosk.config.screen_off_after * 1000, self._seat)
             notif.dispatcher["idled"] = self._on_idled
             notif.dispatcher["resumed"] = self._on_resumed
             self._notification = notif
@@ -392,7 +448,8 @@ class PortalService(dbus.service.Object):
 class Kiosk:
     """Holds all state; everything runs in the GLib main loop thread."""
 
-    def __init__(self):
+    def __init__(self, config):
+        self.config = config
         self.cages = {}      # sock_path -> CageClient
         self.cookies = {}    # cookie(int) -> sender unique bus name
         self.requests = {}   # portal request path -> PortalRequest
@@ -441,8 +498,10 @@ class Kiosk:
         # screen (and allow suspend) immediately instead of after the
         # usual timeout.  Restart the countdown.
         if not self.cookies:
-            self._grace_until = time.monotonic() + SCREEN_OFF_AFTER
-            log.info("idle countdown restarted (%ds)", SCREEN_OFF_AFTER)
+            self._grace_until = (
+                time.monotonic() + self.config.screen_off_after)
+            log.info("idle countdown restarted (%ds)",
+                     self.config.screen_off_after)
         self.state_changed()
 
     # -- logind INHIBIT_IDLE lock -----------------------------------------
@@ -486,7 +545,7 @@ class Kiosk:
         afterwards; watch for both appearance and disappearance."""
         seen = set()
         for path in sorted(glob.glob(os.path.join(
-                XDG_RUNTIME_DIR, "wayland-*"))):
+                self.config.runtime_dir, "wayland-*"))):
             try:
                 st = os.stat(path)
             except OSError:
@@ -509,7 +568,7 @@ class Kiosk:
 
     def _sync_screen(self):
         want_off = bool(self.cages) and not self._lock_wanted()
-        path, name, enabled = foreground_output(self.cages)
+        path, name, enabled = foreground_output(self.config, self.cages)
         if not name:
             if want_off != self.screen_off and not self._no_output_warned:
                 log.warning("want screen %s but no foreground output",
@@ -526,14 +585,16 @@ class Kiosk:
             self.screen_off = screen_off_now
             return
         if want_off:
-            if wlr_randr(path, "--output", name, "--off") is None:
+            if wlr_randr(
+                    self.config, path, "--output", name, "--off") is None:
                 log.warning("wlr-randr --off failed: %s (%s)",
                             name, os.path.basename(path))
                 return
             self.screen_off = True
             log.info("screen off: %s (%s)", name, os.path.basename(path))
         else:
-            if wlr_randr(path, "--output", name, "--on") is None:
+            if wlr_randr(
+                    self.config, path, "--output", name, "--on") is None:
                 log.warning("wlr-randr --on failed: %s (%s)",
                             name, os.path.basename(path))
                 return
@@ -556,21 +617,29 @@ class Kiosk:
 
 
 def main():
+    args = parse_args()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         stream=sys.stdout)
     GLib.set_prgname("kiosk-inhibit")
 
-    # Shared session bus of the kiosk user (all three cages use it).
-    address = os.environ.get(
-        "DBUS_SESSION_BUS_ADDRESS", "unix:path=%s/bus" % XDG_RUNTIME_DIR)
+    try:
+        config = load_config(args.config)
+    except (OSError, ValueError, configparser.Error) as e:
+        log.error("cannot load config %s: %s", args.config, e)
+        return 1
+
+    # Make the configured paths authoritative for pywayland, dbus and the
+    # wlr-randr children instead of relying on the unit environment.
+    os.environ["XDG_RUNTIME_DIR"] = config.runtime_dir
+    os.environ["DBUS_SESSION_BUS_ADDRESS"] = config.session_bus_address
 
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
-    kiosk = Kiosk()
+    kiosk = Kiosk(config)
     # BusConnection (not the bare Connection): dbus.service.BusName
     # needs the _bus_names registry that only a BusConnection carries.
-    kiosk._session_bus = dbus.bus.BusConnection(address)
+    kiosk._session_bus = dbus.bus.BusConnection(config.session_bus_address)
 
     # Own the inhibitor names. Fail hard if one is already taken: the
     # design routes apps to us by name ownership, and silently doing
@@ -598,7 +667,7 @@ def main():
     kiosk._sync_screen()
 
     loop = GLib.MainLoop()
-    GLib.timeout_add_seconds(SCAN_INTERVAL, kiosk.tick)
+    GLib.timeout_add_seconds(config.scan_interval, kiosk.tick)
 
     # GLib signal callbacks get no arguments (unlike IO watches).
     def _sigterm(*_args):
@@ -611,7 +680,8 @@ def main():
     else:
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, _sigterm)
 
-    log.info("kiosk-inhibit started (screen_off_after=%ds)", SCREEN_OFF_AFTER)
+    log.info("kiosk-inhibit started (screen_off_after=%ds)",
+             config.screen_off_after)
     try:
         loop.run()
     finally:

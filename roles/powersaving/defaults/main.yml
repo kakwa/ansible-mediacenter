@@ -1,0 +1,9 @@
+---
+# kiosk-inhibit daemon configuration.  The daemon itself is a fixed
+# script; its tunables live in the INI file rendered from
+# templates/kiosk-inhibit.conf.j2.
+kiosk_inhibit_config_file: /etc/kiosk-inhibit.conf
+kiosk_inhibit_runtime_dir: "/run/user/{{ kodi_user_uid }}"
+kiosk_inhibit_session_bus_address: "unix:path={{ kiosk_inhibit_runtime_dir }}/bus"
+kiosk_inhibit_scan_interval: 2   # s: socket scan + state re-evaluation
+kiosk_inhibit_wlr_timeout: 5     # s: per wlr-randr invocation
